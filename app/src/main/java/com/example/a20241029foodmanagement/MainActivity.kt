@@ -2,24 +2,29 @@ package com.example.a20241029foodmanagement
 
 import android.content.Intent
 import android.os.Bundle
+import android.util.Log
 import android.widget.Button
 import android.widget.EditText
 import android.widget.TextView
 import androidx.activity.enableEdgeToEdge
 import androidx.appcompat.app.AppCompatActivity
+import com.google.android.material.snackbar.Snackbar
+import retrofit2.Call
+import retrofit2.Callback
+import retrofit2.Response
 import java.text.SimpleDateFormat
 import java.util.Calendar
 import java.util.Locale
 
 class MainActivity : AppCompatActivity() {
-    private lateinit var dbHelper: DatabaseHelper
+    private lateinit var foodApi: FoodApi
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         enableEdgeToEdge()
         setContentView(R.layout.activity_main)
 
-        dbHelper = DatabaseHelper(this)
+        foodApi = ApiService.foodApi
 
         val foodNameEdit = findViewById<EditText>(R.id.foodNameEdit)
         val foodCaloriesEdit = findViewById<EditText>(R.id.foodCaloriesEdit)
@@ -49,15 +54,55 @@ class MainActivity : AppCompatActivity() {
             val dateFormat = SimpleDateFormat("yyyy-MM-dd", Locale.getDefault())
             val formattedDate = dateFormat.format(calendar.time)
 
-            // Insert food with today's date
-            dbHelper.insertFood(foodName, foodCalories, formattedDate)
+            val foodEntry =
+                FoodEntry(food_name = foodName, calories = foodCalories ?: 0, date = formattedDate)
 
-            displayFoodEntries(resultsTextView)
+            foodApi.addFood(foodEntry).enqueue(object : Callback<Void> {
+                override fun onResponse(call: Call<Void>, response: Response<Void>) {
+                    if (response.isSuccessful) {
+                        displayFoodEntries(resultsTextView)
+                    } else {
+                        Snackbar.make(
+                            findViewById(R.id.submit),
+                            "Error: ${response.code()}",
+                            Snackbar.LENGTH_LONG
+                        ).show()
+                    }
+                }
+
+                override fun onFailure(call: Call<Void>, t: Throwable) {
+                    Snackbar.make(
+                        findViewById(R.id.submit),
+                        "Failed to add food entry: ${t.message}",
+                        Snackbar.LENGTH_LONG
+                    ).show()
+//                    Log.e("MainActivity", "Failed to add food entry: ${t.message}")
+                }
+            })
         }
 
         clearDBButton.setOnClickListener {
-            dbHelper.clearDatabase()
-            displayFoodEntries(resultsTextView)
+            foodApi.clearDatabase().enqueue(object : Callback<Void> {
+                override fun onResponse(call: Call<Void>, response: Response<Void>) {
+                    if (response.isSuccessful) {
+                        displayFoodEntries(resultsTextView)
+                    } else {
+                        Snackbar.make(
+                            findViewById(R.id.submit),
+                            "Error: ${response.code()}",
+                            Snackbar.LENGTH_LONG
+                        ).show()
+                    }
+                }
+
+                override fun onFailure(call: Call<Void>, t: Throwable) {
+                    Snackbar.make(
+                        findViewById(R.id.submit),
+                        "Failed to clear database: ${t.message}",
+                        Snackbar.LENGTH_LONG
+                    ).show()
+                }
+            })
         }
     }
 
@@ -66,7 +111,8 @@ class MainActivity : AppCompatActivity() {
         val calendar = Calendar.getInstance()
 
         // Format the date to a string
-        val dateFormat = SimpleDateFormat("yyyy-MM-dd", Locale.getDefault()) // Customize the format as needed
+        val dateFormat =
+            SimpleDateFormat("yyyy-MM-dd", Locale.getDefault()) // Customize the format as needed
         val formattedDate = dateFormat.format(calendar.time)
 
         // Set the formatted date string to the TextView
@@ -74,25 +120,31 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun displayFoodEntries(textView: TextView) {
-        // Get today's date
-        val calendar = Calendar.getInstance()
-        val dateFormat = SimpleDateFormat("yyyy-MM-dd", Locale.getDefault())
-        val formattedDate = dateFormat.format(calendar.time)
+        foodApi.getTodaysFood().enqueue(object : Callback<List<FoodEntry>> {
+            override fun onResponse(
+                call: Call<List<FoodEntry>>,
+                response: Response<List<FoodEntry>>
+            ) {
+                if (response.isSuccessful) {
+                    val foodEntries =
+                        response.body()?.joinToString("\n") { "${it.food_name}: ${it.calories}" }
+                    textView.text = foodEntries ?: "No entries"
+                } else {
+                    Snackbar.make(
+                        findViewById(R.id.results),
+                        "Error: ${response.code()}",
+                        Snackbar.LENGTH_LONG
+                    ).show()
+                }
+            }
 
-        // Get only today's food entries
-        val cursor = dbHelper.getTodaysFood(formattedDate)
-        val foodEntries = StringBuilder()
-
-        if (cursor.moveToFirst()) {
-            do {
-                val foodName = cursor.getString(cursor.getColumnIndexOrThrow(DatabaseHelper.COLUMN_FOOD_NAME))
-                val calories = cursor.getInt(cursor.getColumnIndexOrThrow(DatabaseHelper.COLUMN_CALORIES))
-                foodEntries.append("$foodName: $calories\n")
-            } while (cursor.moveToNext())
-        }
-        cursor.close()
-
-        // Set the formatted string in the TextView
-        textView.text = foodEntries.toString()
+            override fun onFailure(call: Call<List<FoodEntry>>, t: Throwable) {
+                Snackbar.make(
+                    findViewById(R.id.results),
+                    "Failed to load food entries: ${t.message}",
+                    Snackbar.LENGTH_LONG
+                ).show()
+            }
+        })
     }
 }
